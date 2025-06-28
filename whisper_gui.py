@@ -248,7 +248,11 @@ def transcribe_files(filepaths, status_label, progress_bar, output_format, trans
                                 end_time = segment.get('end', 0) + chunk['start_time']
                                 text = segment.get('text', '').strip()
                                 if text:
-                                    transcript_text += f"[{start_time:.1f}s - {end_time:.1f}s] {text}\n\n"
+                                    # Format timestamp more prominently
+                                    start_formatted = format_timestamp_display(start_time)
+                                    end_formatted = format_timestamp_display(end_time)
+                                    transcript_text += f"⏰ [{start_formatted} → {end_formatted}]\n"
+                                    transcript_text += f"💬 {text}\n\n"
                         
                         # Append to transcript box
                         transcript_box.config(state='normal')
@@ -294,7 +298,11 @@ def transcribe_files(filepaths, status_label, progress_bar, output_format, trans
                             end_time = segment.get('end', 0)
                             text = segment.get('text', '').strip()
                             if text:
-                                transcript_text += f"[{start_time:.1f}s - {end_time:.1f}s] {text}\n\n"
+                                # Format timestamp more prominently
+                                start_formatted = format_timestamp_display(start_time)
+                                end_formatted = format_timestamp_display(end_time)
+                                transcript_text += f"⏰ [{start_formatted} → {end_formatted}]\n"
+                                transcript_text += f"💬 {text}\n\n"
                     
                     progress.update_transcript(transcript_text)
                 
@@ -479,6 +487,20 @@ def format_timestamp(seconds):
     secs = seconds % 60
     return f"{hours:02d}:{minutes:02d}:{secs:06.3f}".replace('.', ',')
 
+def format_timestamp_display(seconds):
+    """Format timestamp for GUI display (more readable)"""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}m {secs:.1f}s"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours}h {minutes}m {secs:.1f}s"
+
 def check_ffmpeg():
     """Check if FFmpeg is available"""
     try:
@@ -500,68 +522,180 @@ def show_ffmpeg_warning():
         )
 
 root = tk.Tk()
-root.title("Whisper Batch Transcriber")
-window_width, window_height = 800, 600
+root.title("GameScribe Pro - Professional Gaming Transcription")
+window_width, window_height = 900, 700
 center_window(root, window_width, window_height)
-root.configure(bg="#23272f")
+
+# Gaming theme colors
+GAMING_BG = "#0a0a0a"  # Deep black
+GAMING_FRAME = "#1a1a1a"  # Dark gray
+GAMING_ACCENT = "#00ff88"  # Neon green
+GAMING_SECONDARY = "#ff6b35"  # Orange accent
+GAMING_TEXT = "#ffffff"  # White text
+GAMING_TEXT_SECONDARY = "#cccccc"  # Light gray text
+GAMING_BORDER = "#333333"  # Border color
+
+root.configure(bg=GAMING_BG)
 
 # Check for FFmpeg on startup
 root.after(1000, show_ffmpeg_warning)  # Show warning after 1 second
 
-frame = tk.Frame(root, bg="#2c313c")
-frame.pack(expand=True, fill="both", padx=30, pady=30)
+# Main container with gaming styling
+frame = tk.Frame(root, bg=GAMING_FRAME, relief="flat", bd=2)
+frame.pack(expand=True, fill="both", padx=20, pady=20)
 
-header = tk.Label(frame, text="GameScribe: Whisper Batch Transcriber", font=("Segoe UI", 20, "bold"), fg="#f5c518", bg="#2c313c")
-header.pack(pady=(0, 18))
+# Gaming header with gradient effect
+header_frame = tk.Frame(frame, bg=GAMING_FRAME, height=80)
+header_frame.pack(fill="x", pady=(0, 20))
+header_frame.pack_propagate(False)
 
-label = tk.Label(frame, text="Drag and drop files or click below to select", font=("Segoe UI", 14), fg="#ffffff", bg="#2c313c")
+# Main title with gaming font
+header = tk.Label(header_frame, text="GAMESCRIBE", font=("Arial Black", 24, "bold"), 
+                 fg=GAMING_ACCENT, bg=GAMING_FRAME)
+header.pack(pady=(15, 5))
+
+# Subtitle
+subtitle = tk.Label(header_frame, text="Professional Gaming Video Transcription", 
+                   font=("Arial", 12), fg=GAMING_TEXT_SECONDARY, bg=GAMING_FRAME)
+subtitle.pack()
+
+# Divider line
+divider = tk.Frame(frame, height=2, bg=GAMING_ACCENT)
+divider.pack(fill="x", pady=(0, 20))
+
+# Instructions with gaming styling
+label = tk.Label(frame, text="🎮 Select your gaming videos for professional transcription", 
+                font=("Arial", 12, "bold"), fg=GAMING_TEXT, bg=GAMING_FRAME)
 label.pack(pady=10)
 
-status_label = tk.Label(frame, text="", fg="#00bfff", bg="#2c313c", font=("Segoe UI", 12, "italic"))
+# Status label with gaming colors
+status_label = tk.Label(frame, text="", fg=GAMING_ACCENT, bg=GAMING_FRAME, 
+                       font=("Arial", 12, "italic"))
 status_label.pack(pady=5)
 
-progress_bar = ttk.Progressbar(frame, orient="horizontal", length=400, mode="determinate")
+# Gaming-style progress bar
+progress_style = ttk.Style()
+progress_style.theme_use('default')
+progress_style.configure("Gaming.Horizontal.TProgressbar",
+                        troughcolor=GAMING_BORDER,
+                        background=GAMING_ACCENT,
+                        bordercolor=GAMING_ACCENT,
+                        lightcolor=GAMING_ACCENT,
+                        darkcolor=GAMING_ACCENT)
+
+progress_bar = ttk.Progressbar(frame, orient="horizontal", length=500, mode="determinate", 
+                              style="Gaming.Horizontal.TProgressbar")
 progress_bar.pack(pady=10)
 
-# Output format selection
-dropdown_frame = tk.Frame(frame, bg="#2c313c")
-dropdown_frame.pack(pady=5)
+# Output format selection with gaming styling
+dropdown_frame = tk.Frame(frame, bg=GAMING_FRAME)
+dropdown_frame.pack(pady=10)
+
 output_format_var = tk.StringVar(value=OUTPUT_FORMATS[0])
-output_label = tk.Label(dropdown_frame, text="Output Format:", font=("Segoe UI", 12), fg="#f5c518", bg="#2c313c")
-output_label.pack(side=tk.LEFT, padx=(0, 8))
-output_dropdown = ttk.Combobox(dropdown_frame, textvariable=output_format_var, values=OUTPUT_FORMATS, state="readonly", font=("Segoe UI", 12))
+output_label = tk.Label(dropdown_frame, text="📁 Output Format:", font=("Arial", 12, "bold"), 
+                       fg=GAMING_ACCENT, bg=GAMING_FRAME)
+output_label.pack(side=tk.LEFT, padx=(0, 10))
+
+# Style the combobox
+style = ttk.Style()
+style.configure("Gaming.TCombobox",
+                fieldbackground=GAMING_BORDER,
+                background=GAMING_ACCENT,
+                foreground=GAMING_TEXT,
+                arrowcolor=GAMING_ACCENT,
+                bordercolor=GAMING_ACCENT)
+
+output_dropdown = ttk.Combobox(dropdown_frame, textvariable=output_format_var, 
+                              values=OUTPUT_FORMATS, state="readonly", 
+                              font=("Arial", 11), style="Gaming.TCombobox", width=15)
 output_dropdown.pack(side=tk.LEFT)
 
-# Large file processing settings
-settings_frame = tk.Frame(frame, bg="#2c313c")
-settings_frame.pack(pady=5)
+# Large file processing settings with gaming styling
+settings_frame = tk.Frame(frame, bg=GAMING_FRAME, relief="flat", bd=1)
+settings_frame.pack(pady=15, padx=20, fill="x")
+
+# Settings header
+settings_header = tk.Label(settings_frame, text="⚙️ Advanced Settings", 
+                          font=("Arial", 14, "bold"), fg=GAMING_SECONDARY, bg=GAMING_FRAME)
+settings_header.pack(pady=(10, 15))
 
 # Max file size setting
-size_frame = tk.Frame(settings_frame, bg="#2c313c")
-size_frame.pack(pady=2)
-size_label = tk.Label(size_frame, text="Max File Size (GB):", font=("Segoe UI", 10), fg="#f5c518", bg="#2c313c")
-size_label.pack(side=tk.LEFT, padx=(0, 8))
+size_frame = tk.Frame(settings_frame, bg=GAMING_FRAME)
+size_frame.pack(pady=5)
+size_label = tk.Label(size_frame, text="💾 Max File Size (GB):", font=("Arial", 11, "bold"), 
+                     fg=GAMING_TEXT, bg=GAMING_FRAME)
+size_label.pack(side=tk.LEFT, padx=(0, 10))
 size_var = tk.StringVar(value=str(MAX_FILE_SIZE_GB))
-size_entry = tk.Entry(size_frame, textvariable=size_var, width=8, font=("Segoe UI", 10), bg="#1e222a", fg="#f5f6fa", bd=1, relief="solid")
+size_entry = tk.Entry(size_frame, textvariable=size_var, width=10, font=("Arial", 11), 
+                     bg=GAMING_BORDER, fg=GAMING_TEXT, bd=1, relief="solid", 
+                     insertbackground=GAMING_ACCENT)
 size_entry.pack(side=tk.LEFT)
 
 # Chunk duration setting
-chunk_frame = tk.Frame(settings_frame, bg="#2c313c")
-chunk_frame.pack(pady=2)
-chunk_label = tk.Label(chunk_frame, text="Chunk Duration (min):", font=("Segoe UI", 10), fg="#f5c518", bg="#2c313c")
-chunk_label.pack(side=tk.LEFT, padx=(0, 8))
+chunk_frame = tk.Frame(settings_frame, bg=GAMING_FRAME)
+chunk_frame.pack(pady=5)
+chunk_label = tk.Label(chunk_frame, text="⏱️ Chunk Duration (min):", font=("Arial", 11, "bold"), 
+                      fg=GAMING_TEXT, bg=GAMING_FRAME)
+chunk_label.pack(side=tk.LEFT, padx=(0, 10))
 chunk_var = tk.StringVar(value=str(CHUNK_DURATION // 60))
-chunk_entry = tk.Entry(chunk_frame, textvariable=chunk_var, width=8, font=("Segoe UI", 10), bg="#1e222a", fg="#f5f6fa", bd=1, relief="solid")
+chunk_entry = tk.Entry(chunk_frame, textvariable=chunk_var, width=10, font=("Arial", 11), 
+                      bg=GAMING_BORDER, fg=GAMING_TEXT, bd=1, relief="solid", 
+                      insertbackground=GAMING_ACCENT)
 chunk_entry.pack(side=tk.LEFT)
 
-select_btn = tk.Button(frame, text="Select Files", command=lambda: select_files(status_label, progress_bar, output_format_var, transcript_box, size_var, chunk_var), font=("Segoe UI", 12, "bold"), bg="#f5c518", fg="#23272f", activebackground="#ffe066", activeforeground="#23272f", bd=0, padx=10, pady=6)
-select_btn.pack(pady=8)
+# Gaming-style buttons
+button_frame = tk.Frame(frame, bg=GAMING_FRAME)
+button_frame.pack(pady=15)
 
-open_btn = tk.Button(frame, text="Open Transcript Folder", command=open_output_folder, font=("Segoe UI", 12), bg="#393e46", fg="#f5c518", activebackground="#23272f", activeforeground="#f5c518", bd=0, padx=10, pady=6)
-open_btn.pack(pady=8)
+# Select files button with gaming styling
+select_btn = tk.Button(button_frame, text="🎯 SELECT GAMING VIDEOS", 
+                      command=lambda: select_files(status_label, progress_bar, output_format_var, transcript_box, size_var, chunk_var), 
+                      font=("Arial Black", 12, "bold"), bg=GAMING_ACCENT, fg=GAMING_BG, 
+                      activebackground=GAMING_SECONDARY, activeforeground=GAMING_TEXT, 
+                      bd=0, padx=20, pady=8, relief="flat")
+select_btn.pack(pady=5)
 
-# Transcript display box
-transcript_box = scrolledtext.ScrolledText(frame, wrap=tk.WORD, font=("Consolas", 12), height=15, width=80, bg="#1e222a", fg="#f5f6fa", state='disabled')
-transcript_box.pack(pady=15, fill="both", expand=True)
+# Open folder button
+open_btn = tk.Button(button_frame, text="📂 OPEN TRANSCRIPT FOLDER", 
+                    command=open_output_folder, 
+                    font=("Arial", 11, "bold"), bg=GAMING_BORDER, fg=GAMING_ACCENT, 
+                    activebackground=GAMING_SECONDARY, activeforeground=GAMING_TEXT, 
+                    bd=0, padx=15, pady=6, relief="flat")
+open_btn.pack(pady=5)
+
+# Transcript display box with gaming styling
+transcript_label = tk.Label(frame, text="📝 LIVE TRANSCRIPT", font=("Arial", 14, "bold"), 
+                           fg=GAMING_SECONDARY, bg=GAMING_FRAME)
+transcript_label.pack(pady=(20, 10))
+
+transcript_box = scrolledtext.ScrolledText(
+    frame, 
+    wrap=tk.WORD, 
+    font=("Consolas", 11), 
+    height=18, 
+    width=90, 
+    bg=GAMING_BG, 
+    fg=GAMING_ACCENT, 
+    state='disabled',
+    relief="flat",
+    bd=2,
+    insertbackground=GAMING_ACCENT,
+    selectbackground=GAMING_SECONDARY,
+    selectforeground=GAMING_TEXT
+)
+transcript_box.pack(pady=10, padx=20, fill="both", expand=True)
+
+# Add some initial text to show the gaming theme
+transcript_box.config(state='normal')
+transcript_box.insert(tk.END, "🎮 GameScribe Pro - Ready for Professional Gaming Transcription\n")
+transcript_box.insert(tk.END, "="*60 + "\n\n")
+transcript_box.insert(tk.END, "💡 Features:\n")
+transcript_box.insert(tk.END, "• Real-time progress tracking\n")
+transcript_box.insert(tk.END, "• Large file processing (chunking)\n")
+transcript_box.insert(tk.END, "• Enhanced timestamp display\n")
+transcript_box.insert(tk.END, "• Multiple output formats\n")
+transcript_box.insert(tk.END, "• Professional gaming aesthetic\n\n")
+transcript_box.insert(tk.END, "🎯 Select your gaming videos to get started!\n")
+transcript_box.config(state='disabled')
 
 root.mainloop()
