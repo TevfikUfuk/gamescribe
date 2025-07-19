@@ -10,6 +10,8 @@ import math
 import subprocess
 import tempfile
 import shutil
+import tkinter.simpledialog
+import whisperx
 
 # Load the model once (change "small" to your preferred model)
 MODEL = whisper.load_model("small")
@@ -27,6 +29,8 @@ MAX_FILE_SIZE_GB = 1.0
 # Chunk duration in seconds for large files
 CHUNK_DURATION = 300  # 5 minutes per chunk
 
+# --- GLOBAL HUGGINGFACE TOKEN (set here to hardcode, or leave as empty string) ---
+HUGGINGFACE_TOKEN = "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"  # <-- Set your token here to hardcode, or leave blank to use GUI
 
 class TranscriptionProgress:
     def __init__(self, status_label, progress_bar, transcript_box):
@@ -338,6 +342,10 @@ def transcribe_files(filepaths, status_label, progress_bar, output_format, trans
     status_label.config(text="All done! Transcripts saved.")
     progress_bar['value'] = 100
     progress_bar.update_idletasks()
+    
+    # Show the open folder button after successful transcription
+    show_open_folder_button()
+    
     messagebox.showinfo("Done", "Transcription complete!")
 
 
@@ -477,15 +485,18 @@ def merge_transcript_chunks(chunks_results, output_path, output_format):
                     start_time = segment['start'] + chunk_result['start_time']
                     end_time = segment['end'] + chunk_result['start_time']
                     
-                    f.write(f"{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n")
+                    # Use proper VTT format with dot as decimal separator
+                    from whisper.utils import format_timestamp as whisper_format_timestamp
+                    start_formatted = whisper_format_timestamp(start_time, always_include_hours=True, decimal_marker=".")
+                    end_formatted = whisper_format_timestamp(end_time, always_include_hours=True, decimal_marker=".")
+                    
+                    f.write(f"{start_formatted} --> {end_formatted}\n")
                     f.write(f"{segment['text'].strip()}\n\n")
 
 def format_timestamp(seconds):
-    """Format timestamp for SRT/VTT files"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}".replace('.', ',')
+    """Format timestamp for SRT/VTT files using Whisper's format_timestamp"""
+    from whisper.utils import format_timestamp as whisper_format_timestamp
+    return whisper_format_timestamp(seconds, always_include_hours=True, decimal_marker=",")
 
 def format_timestamp_display(seconds):
     """Format timestamp for GUI display (more readable)"""
@@ -521,6 +532,167 @@ def show_ffmpeg_warning():
             "3. Restart the application"
         )
 
+# --- WHISPERX DIARIZATION INTEGRATION ---
+def run_whisperx_diarization(audio_path, hf_token, device="cpu", model_size="small"):
+    model = whisperx.load_model(model_size, device, compute_type="float32")
+    result = model.transcribe(audio_path)
+    from whisperx.diarize import DiarizationPipeline
+    diarize_model = DiarizationPipeline(use_auth_token=hf_token, device=device)
+    diarize_segments = diarize_model(audio_path)
+    result = whisperx.assign_word_speakers(diarize_segments, result)
+    return result
+
+def get_custom_speaker_names(segments, parent_window):
+    speakers = sorted(set(seg['speaker'] for seg in segments if 'speaker' in seg))
+    custom_names = {}
+    for idx, speaker in enumerate(speakers):
+        if idx == 0:
+            prompt = f"Enter a name for {speaker} (e.g., Me):"
+        else:
+            prompt = f"Enter a name for {speaker} (e.g., Player {idx}):"
+        name = tkinter.simpledialog.askstring(
+            "Custom Speaker Name",
+            prompt,
+            parent=parent_window
+        )
+        if not name or not name.strip():
+            if idx == 0:
+                name = speaker  # fallback to original label for first speaker
+            else:
+                name = f"Player {idx}"
+        custom_names[speaker] = name
+    return custom_names
+
+def display_diarized_transcript(segments, custom_names, transcript_box):
+    transcript_box.config(state='normal')
+    transcript_box.delete(1.0, tk.END)
+    for seg in segments:
+        speaker = custom_names.get(seg['speaker'], seg['speaker'])
+        start = format_timestamp_display(seg['start'])
+        end = format_timestamp_display(seg['end'])
+        text = seg['text'].strip()
+        if text:
+            transcript_box.insert(tk.END, f"⏰ [{start} → {end}]\n", "timestamp")
+            transcript_box.insert(tk.END, f"🎤 {speaker}: ", "speaker")
+            transcript_box.insert(tk.END, f"{text}\n\n", "text")
+    transcript_box.config(state='disabled')
+
+def run_diarization_workflow():
+    audio_path = filedialog.askopenfilename(
+        title="Select audio/video file for diarization",
+        filetypes=[("Media files", "*.mp4 *.mkv *.avi *.mov *.flac *.mp3 *.wav")]
+    )
+    if not audio_path:
+        return
+    # Use token from entry, or hardcoded, or prompt if both empty
+    token = token_var.get().strip() or HUGGINGFACE_TOKEN.strip()
+    if not token:
+        token = tkinter.simpledialog.askstring(
+            "HuggingFace Token",
+            "Enter your HuggingFace token for diarization:",
+            parent=root
+        )
+        if not token:
+            messagebox.showerror("Token Required", "You must enter a HuggingFace token.")
+            return
+    status_label.config(text="Running WhisperX diarization...")
+    root.update_idletasks()
+    try:
+        result = run_whisperx_diarization(audio_path, token, device="cpu", model_size="small")
+    except Exception as e:
+        error_str = str(e)
+        # Check for pyannote gating error
+        if (
+            "Could not download 'pyannote/speaker-diarization-3.1'" in error_str or
+            "403 Client Error" in error_str or
+            "is private or gated" in error_str or
+            "access token" in error_str
+        ):
+            messagebox.showerror(
+                "Diarization Model Access Error",
+                "Access to the diarization model is gated.\n\n"
+                "To use speaker diarization, you must:\n"
+                "1. Visit https://hf.co/pyannote/speaker-diarization-3.1 and click 'Agree and access repository' while logged in.\n"
+                "2. Go to https://hf.co/settings/tokens and create a new token (with 'read' access).\n"
+                "3. Use this token in GameScribe when prompted.\n\n"
+                "If you have already done this and still see this error, try logging out and back in to HuggingFace, or check your token permissions.\n\n"
+                f"Original error: {error_str}"
+            )
+        else:
+            messagebox.showerror("Diarization Error", f"Error running WhisperX: {e}")
+        status_label.config(text="Diarization failed.")
+        return
+    # DEBUG: Show the first segment after diarization
+    segments = result.get('segments', [])
+    if segments:
+        import json
+        messagebox.showinfo("Debug: First Diarization Segment", json.dumps(segments[0], indent=2))
+    else:
+        messagebox.showinfo("Debug: Diarization Segments", "No segments returned by diarization.")
+    custom_names = get_custom_speaker_names(result['segments'], root)
+    # Check if segments exist and are non-empty
+    if not segments:
+        messagebox.showinfo("No Transcript", "No transcript segments were found after diarization.\nThis may mean the audio was too short, too quiet, or diarization failed.")
+        status_label.config(text="No transcript available.")
+        return
+    try:
+        display_diarized_transcript(segments, custom_names, transcript_box)
+        status_label.config(text="Diarization complete!")
+        num_with_text = sum(1 for seg in segments if seg.get('text', '').strip())
+        messagebox.showinfo(
+            "Debug: Transcript Display",
+            f"display_diarized_transcript ran. Segments: {len(segments)}, with text: {num_with_text}" + (
+                "\n\nIf you still see nothing, check for color issues or widget overlap." if num_with_text > 0 else "\n\nNo segments had text."
+            )
+        )
+        # --- Save diarized transcript in selected format ---
+        output_format = diari_output_format_var.get()
+        filename = os.path.splitext(os.path.basename(audio_path))[0]
+        out_path = os.path.join(OUTPUT_FOLDER, f"{filename}.{output_format}")
+        save_diarized_transcript(segments, custom_names, out_path, output_format)
+        
+        # Show the open folder button after successful diarization
+        show_open_folder_button()
+        
+        messagebox.showinfo("Transcript Saved", f"Diarized transcript saved as:\n{out_path}")
+    except Exception as e:
+        messagebox.showerror("Display Error", f"An error occurred while displaying the transcript: {e}")
+        status_label.config(text="Failed to display transcript.")
+
+# Helper to save diarized transcript in txt, srt, or vtt
+
+def save_diarized_transcript(segments, custom_names, out_path, output_format):
+    if output_format == "txt":
+        with open(out_path, "w", encoding="utf-8") as f:
+            for seg in segments:
+                speaker = custom_names.get(seg['speaker'], seg['speaker'])
+                start = format_timestamp_display(seg['start'])
+                end = format_timestamp_display(seg['end'])
+                text = seg['text'].strip()
+                if text:
+                    f.write(f"[{start} → {end}] {speaker}: {text}\n\n")
+    elif output_format == "srt":
+        with open(out_path, "w", encoding="utf-8") as f:
+            for idx, seg in enumerate(segments, 1):
+                speaker = custom_names.get(seg['speaker'], seg['speaker'])
+                start = format_timestamp(seg['start'])
+                end = format_timestamp(seg['end'])
+                text = seg['text'].strip()
+                if text:
+                    f.write(f"{idx}\n{start} --> {end}\n{speaker}: {text}\n\n")
+    elif output_format == "vtt":
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("WEBVTT\n\n")
+            for seg in segments:
+                speaker = custom_names.get(seg['speaker'], seg['speaker'])
+                # Use proper VTT format with dot as decimal separator
+                from whisper.utils import format_timestamp as whisper_format_timestamp
+                start = whisper_format_timestamp(seg['start'], always_include_hours=True, decimal_marker=".")
+                end = whisper_format_timestamp(seg['end'], always_include_hours=True, decimal_marker=".")
+                text = seg['text'].strip()
+                if text:
+                    f.write(f"{start} --> {end}\n{speaker}: {text}\n\n")
+
 root = tk.Tk()
 root.title("GameScribe Pro - Professional Gaming Transcription")
 window_width, window_height = 900, 700
@@ -539,6 +711,24 @@ root.configure(bg=GAMING_BG)
 
 # Check for FFmpeg on startup
 root.after(1000, show_ffmpeg_warning)  # Show warning after 1 second
+
+# Function to show the open folder button
+def show_open_folder_button():
+    if not open_btn.winfo_ismapped():
+        open_btn.pack(pady=5)
+        # Add a subtle animation effect with glow
+        open_btn.config(bg=GAMING_ACCENT, fg=GAMING_BG)
+        root.after(200, lambda: open_btn.config(bg=GAMING_BORDER, fg=GAMING_ACCENT))
+
+# Check if there are existing transcript files and show the open folder button
+def check_existing_transcripts():
+    if os.path.exists(OUTPUT_FOLDER):
+        transcript_files = [f for f in os.listdir(OUTPUT_FOLDER) 
+                          if f.endswith(('.txt', '.srt', '.vtt'))]
+        if transcript_files:
+            show_open_folder_button()
+
+root.after(2000, check_existing_transcripts)  # Check after 2 seconds
 
 # Main container with gaming styling
 frame = tk.Frame(root, bg=GAMING_FRAME, relief="flat", bd=2)
@@ -655,13 +845,13 @@ select_btn = tk.Button(button_frame, text="🎯 SELECT GAMING VIDEOS",
                       bd=0, padx=20, pady=8, relief="flat")
 select_btn.pack(pady=5)
 
-# Open folder button
+# Open folder button (initially hidden)
 open_btn = tk.Button(button_frame, text="📂 OPEN TRANSCRIPT FOLDER", 
                     command=open_output_folder, 
                     font=("Arial", 11, "bold"), bg=GAMING_BORDER, fg=GAMING_ACCENT, 
                     activebackground=GAMING_SECONDARY, activeforeground=GAMING_TEXT, 
                     bd=0, padx=15, pady=6, relief="flat")
-open_btn.pack(pady=5)
+# Don't pack initially - will be shown after first transcription
 
 # Transcript display box with gaming styling
 transcript_label = tk.Label(frame, text="📝 LIVE TRANSCRIPT", font=("Arial", 14, "bold"), 
@@ -685,6 +875,11 @@ transcript_box = scrolledtext.ScrolledText(
 )
 transcript_box.pack(pady=10, padx=20, fill="both", expand=True)
 
+# Add tag styling for transcript box (must be after transcript_box is created)
+transcript_box.tag_configure("timestamp", foreground=GAMING_ACCENT, font=("Consolas", 10, "bold"))
+transcript_box.tag_configure("speaker", foreground=GAMING_SECONDARY, font=("Arial", 11, "bold"))
+transcript_box.tag_configure("text", foreground=GAMING_TEXT, font=("Consolas", 11))
+
 # Add some initial text to show the gaming theme
 transcript_box.config(state='normal')
 transcript_box.insert(tk.END, "🎮 GameScribe Pro - Ready for Professional Gaming Transcription\n")
@@ -697,5 +892,52 @@ transcript_box.insert(tk.END, "• Multiple output formats\n")
 transcript_box.insert(tk.END, "• Professional gaming aesthetic\n\n")
 transcript_box.insert(tk.END, "🎯 Select your gaming videos to get started!\n")
 transcript_box.config(state='disabled')
+
+# Add diarization button to the GUI (after button_frame is defined)
+diarize_btn = tk.Button(
+    button_frame,
+    text="🧑‍🤝‍🧑 DIARIZE & NAME SPEAKERS",
+    command=run_diarization_workflow,
+    font=("Arial Black", 12, "bold"),
+    bg=GAMING_SECONDARY, fg=GAMING_BG,
+    activebackground=GAMING_ACCENT, activeforeground=GAMING_TEXT,
+    bd=0, padx=20, pady=8, relief="flat"
+)
+diarize_btn.pack(pady=5)
+
+# Add HuggingFace token entry to the GUI
+
+token_frame = tk.Frame(frame, bg=GAMING_FRAME)
+token_frame.pack(pady=(0, 10))
+
+token_label = tk.Label(token_frame, text="🔑 HuggingFace Token:", font=("Arial", 11, "bold"),
+                      fg=GAMING_TEXT, bg=GAMING_FRAME)
+token_label.pack(side=tk.LEFT, padx=(0, 10))
+
+token_var = tk.StringVar(value=HUGGINGFACE_TOKEN)
+token_entry = tk.Entry(token_frame, textvariable=token_var, width=40, font=("Arial", 11),
+                      bg=GAMING_BORDER, fg=GAMING_TEXT, bd=1, relief="solid",
+                      insertbackground=GAMING_ACCENT, show="*")
+token_entry.pack(side=tk.LEFT)
+
+def save_token():
+    global HUGGINGFACE_TOKEN
+    HUGGINGFACE_TOKEN = token_var.get().strip()
+    messagebox.showinfo("Token Saved", "HuggingFace token saved for this session.")
+
+save_token_btn = tk.Button(token_frame, text="Save", command=save_token,
+                         font=("Arial", 10, "bold"), bg=GAMING_ACCENT, fg=GAMING_BG,
+                         activebackground=GAMING_SECONDARY, activeforeground=GAMING_TEXT,
+                         bd=0, padx=10, pady=2, relief="flat")
+save_token_btn.pack(side=tk.LEFT, padx=(10, 0))
+
+# Add diarization output format dropdown (reuse OUTPUT_FORMATS)
+diari_output_format_var = tk.StringVar(value=OUTPUT_FORMATS[0])
+diari_dropdown_frame = tk.Frame(frame, bg=GAMING_FRAME)
+diari_dropdown_frame.pack(pady=(0, 10))
+diari_output_label = tk.Label(diari_dropdown_frame, text="🗂️ Diarization Output Format:", font=("Arial", 11, "bold"), fg=GAMING_ACCENT, bg=GAMING_FRAME)
+diari_output_label.pack(side=tk.LEFT, padx=(0, 10))
+diari_output_dropdown = ttk.Combobox(diari_dropdown_frame, textvariable=diari_output_format_var, values=OUTPUT_FORMATS, state="readonly", font=("Arial", 11), style="Gaming.TCombobox", width=15)
+diari_output_dropdown.pack(side=tk.LEFT)
 
 root.mainloop()
